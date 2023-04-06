@@ -1,88 +1,79 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	flag "github.com/spf13/pflag"
 )
 
-// BlockListListener is a net.Listener that blocks connections from a list of IPs. New IPs to block can be added with the Block method.
-type BlockListListener struct {
-	listener       net.Listener
-	blockTime      time.Duration
-	blockList      map[string]time.Time
-	blockListMutex sync.RWMutex
+// https://stackoverflow.com/a/33881296
+var epoch = time.Unix(0, 0).Format(time.RFC1123)
+
+var noCacheHeaders = map[string]string{
+	"Expires":         epoch,
+	"Cache-Control":   "no-cache, private, max-age=0",
+	"Pragma":          "no-cache",
+	"X-Accel-Expires": "0",
 }
 
-func NewBlockListListener(network, addr string, blockTime time.Duration) (*BlockListListener, error) {
-	l, err := net.Listen(network, addr)
-	ret := &BlockListListener{
-		listener:       l,
-		blockTime:      blockTime,
-		blockList:      make(map[string]time.Time),
-		blockListMutex: sync.RWMutex{},
-	}
-	return ret, err
+var etagHeaders = []string{
+	"ETag",
+	"If-Modified-Since",
+	"If-Match",
+	"If-None-Match",
+	"If-Range",
+	"If-Unmodified-Since",
 }
 
-func (l *BlockListListener) Accept() (net.Conn, error) {
-	for {
-		conn, err := l.listener.Accept()
-		addr := conn.RemoteAddr().(*net.TCPAddr).IP.String()
-		if t, blocked := l.blockList[addr]; blocked && t.After(time.Now()) {
-			conn.Close()
-			continue
+func NoCache(h http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		// Delete any ETag headers that may have been set
+		for _, v := range etagHeaders {
+			if r.Header.Get(v) != "" {
+				r.Header.Del(v)
+			}
 		}
-		return conn, err
+
+		// Set our NoCache headers
+		for k, v := range noCacheHeaders {
+			w.Header().Set(k, v)
+		}
+
+		// Also set "Connection: close"
+		w.Header().Set("Connection", "close")
+
+		h.ServeHTTP(w, r)
 	}
-}
 
-func (l *BlockListListener) Close() error {
-	return l.listener.Close()
-}
-
-func (l *BlockListListener) Addr() net.Addr {
-	return l.listener.Addr()
-}
-
-func (l *BlockListListener) Block(addr string) {
-	l.blockListMutex.Lock()
-	defer l.blockListMutex.Unlock()
-	l.blockList[addr] = time.Now().Add(l.blockTime)
+	return http.HandlerFunc(fn)
 }
 
 func main() {
 	// Flags
 	var port = flag.IntP("port", "p", 8080, "port to listen on")
-	var blockTime = flag.DurationP("block-time", "b", 5*time.Second, "time to block")
 	var assetsDir = flag.StringP("assets-dir", "a", "./assets", "assets directory")
 	flag.Parse()
 
-	// Listener
-	listener, err := NewBlockListListener("tcp6", fmt.Sprintf(":%d", *port), *blockTime)
-	if err != nil {
-		log.Fatal(err)
-	}
+	var server http.Server
 
 	// Create a static fileserver with 1 API endpopint
 	mux := http.NewServeMux()
 	mux.HandleFunc("/block", func(w http.ResponseWriter, r *http.Request) {
-		addr, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		fmt.Printf("Blocking %s\n", addr)
-		listener.Block(addr)
+		fmt.Println("Shutting down server")
+		server.Shutdown(context.Background())
 	})
 	fs := http.FileServer(http.Dir(*assetsDir))
-	mux.Handle("/", fs)
-	server := http.Server{
+	mux.Handle("/", NoCache(fs))
+	server = http.Server{
 		Handler: mux,
+	}
+	listener, err := net.Listen("tcp6", fmt.Sprintf(":%d", *port))
+	if err != nil {
+		panic(err)
 	}
 
 	server.Serve(listener)
