@@ -30,11 +30,10 @@ function onFrameLoad() {
 
 function injectFunc() {
     fetch("/secret.txt")
-    .then(resp => resp.text())
-    .then(text => {
-        alert(text)
-    })
-}
+        .then(r => r.text())
+        .then(text => {
+            alert(text)
+        })
 
 function injectScript(frame) {
     let doc = frame.contentDocument || frame.contentWindow.document
@@ -46,6 +45,6 @@ function injectScript(frame) {
 
 // Block our IP address
 fetch("/block")
-.finally(_ => {
-    run()
-})
+    .finally(_ => {
+        run()
+    })
