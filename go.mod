@@ -1,4 +1,4 @@
-module gitlab.intruder.io/security-team/research/rebinding-server
+module github.com/intruder-io/rebind-server
 
 go 1.20
 
